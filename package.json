@@ -1,0 +1,98 @@
+{
+  "name": "backup-vault",
+  "displayName": "Backup Vault",
+  "version": "0.0.1",
+  "description": "Professional backup and file transfer tool with version control and secure storage capabilities",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#3794FF",
+    "theme": "dark"
+  },
+  "keywords": ["backup", "file-transfer", "version-control", "storage", "sync"],
+  "categories": ["Other"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VibeKits/backup-vault"
+  },
+  "publisher": "vibe-kit",
+  "engines": { "vscode": "^1.70.0" },
+  "activationEvents": [ "onCommand:backup-vault.run" ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "backup-vault.run",
+        "title": "Backup Vault: Create Backup"
+      },
+      {
+        "command": "backup-vault.sendFiles",
+        "title": "Backup Vault: Send Files"
+      },
+      {
+        "command": "backup-vault.refresh",
+        "title": "Backup Vault: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "backup-vault.toggleSelection",
+        "title": "Toggle Selection"
+      },
+      {
+        "command": "backup-vault.selectAll",
+        "title": "Select All Files & Folders"
+      },
+      {
+        "command": "backup-vault.selectNone",
+        "title": "Select None"
+      },
+      {
+        "command": "backup-vault.editOutputDir",
+        "title": "Edit Output Directory"
+      },
+      {
+        "command": "backup-vault.editSendingDir",
+        "title": "Edit Sending Directory"
+      },
+      {
+        "command": "backup-vault.editSuffix",
+        "title": "Edit Version Suffix"
+      },
+      {
+        "command": "backup-vault.togglePack",
+        "title": "Toggle File Packing"
+      },
+      {
+        "command": "backup-vault.editFolderName",
+        "title": "Edit Folder Name"
+      },
+      {
+        "command": "backup-vault.selectionSummary",
+        "title": "Selection Summary"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "backupVaultConfig",
+          "name": "Backup Vault"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "backup-vault.refresh",
+          "when": "view == backupVaultConfig",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "backup-vault.selectAll",
+          "when": "view == backupVaultConfig && viewItem == folder",
+          "group": "inline"
+        }
+      ]
+    }
+  }
+}
