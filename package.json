@@ -1,14 +1,14 @@
 {
   "name": "backup-vault",
   "displayName": "Backup Vault",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Professional backup and file transfer tool with version control and secure storage capabilities",
   "icon": "images/icon.png",
   "galleryBanner": {
     "color": "#3794FF",
     "theme": "dark"
   },
-  "keywords": ["backup", "file-transfer", "version-control", "storage", "sync"],
+  "keywords": ["backup", "file-transfer", "version-control", "storage", "sync", "cross-platform"],
   "categories": ["Other"],
   "repository": {
     "type": "git",
@@ -16,8 +16,13 @@
   },
   "publisher": "vibe-kit",
   "engines": { "vscode": "^1.70.0" },
+  "os": ["win32", "darwin", "linux"],
   "activationEvents": [ "onCommand:backup-vault.run" ],
   "main": "./src/extension.js",
+  "scripts": {
+    "compile": "node -c src/extension.js && node -c src/fileOperations.js",
+    "vscode:prepublish": "npm run compile"
+  },
   "contributes": {
     "commands": [
       {
@@ -63,7 +68,7 @@
       },
       {
         "command": "backup-vault.editFolderName",
-        "title": "Edit Folder Name"
+        "title": "Edit Packing Folder Name"
       },
       {
         "command": "backup-vault.selectionSummary",

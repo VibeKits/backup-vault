@@ -1,9 +1,10 @@
 const vscode = require('vscode');
-const cp = require('child_process');
 const path = require('path');
 const BackupTreeDataProvider = require('./webview.js');
+const FileOperations = require('./fileOperations.js');
 
 let treeDataProvider = null;
+let fileOps = null;
 
 function activate(context) {
   // Create and register the tree data provider
@@ -11,9 +12,17 @@ function activate(context) {
   global.treeDataProvider = treeDataProvider; // Make it globally accessible
   vscode.window.registerTreeDataProvider('backupVaultConfig', treeDataProvider);
 
+  // Initialize file operations module
+  fileOps = new FileOperations();
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('backup-vault.run', async function () {
+      if (!fileOps) {
+        vscode.window.showErrorMessage('Backup Vault is not properly initialized.');
+        return;
+      }
+
       const settings = context.workspaceState.get('backupSettings', {
         sources: [],
         outputDir: '',
@@ -68,10 +77,10 @@ function activate(context) {
       const dst = path.join(settings.outputDir, finalName);
 
       console.log('Calculated destination:', dst);
-      console.log('Destination exists:', require('fs').existsSync(dst));
 
       let forceOverwrite = false;
-      if (require('fs').existsSync(dst)) {
+      const fs = require('fs');
+      if (fs.existsSync(dst)) {
         console.log('Showing overwrite prompt for:', dst);
         const overwrite = await vscode.window.showWarningMessage(
           `A backup with version '${version}' already exists at:\n${dst}\n\nDo you want to overwrite it?`,
@@ -91,55 +100,37 @@ function activate(context) {
         console.log('No existing backup found, proceeding...');
       }
 
-      // Build the command
-      const script = path.join(__dirname, '..', 'scripts', 'backup_generator_script.ps1');
-      let psCommand = `& '${script}' -Version '${version}' -BackupDir '${settings.outputDir}' -Suffix '${settings.suffix}'`;
-
-      // Add force parameter if user approved overwrite
-      if (forceOverwrite) {
-        psCommand += ` -Force $true`;
-      }
-
-      console.log('Sources count:', settings.sources.length);
-      console.log('Pack files:', settings.packFiles);
-
-      if (settings.sources.length === 1) {
-        console.log('Single source:', settings.sources[0]);
-        psCommand += ` -Source '${settings.sources[0]}'`;
-        if (settings.packFiles) {
-          psCommand += ` -Pack $true -FolderName '${settings.folderName}'`;
-        } else {
-          psCommand += ` -Pack $false`;
-        }
-      } else {
-        // Multiple sources - always pack
-        console.log('Multiple sources:', settings.sources);
-        psCommand += ` -Sources '${settings.sources.join(';')}' -Pack $true -FolderName '${settings.folderName}'`;
-      }
-
-      console.log('PowerShell command:', psCommand);
-
       // Show starting notification
       vscode.window.showInformationMessage(`Backup started (version: ${settings.suffix}${version}).`);
 
-      // Execute PowerShell command silently
-      const { exec } = require('child_process');
-      exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${psCommand}"`, (error, stdout, stderr) => {
-        console.log('Backup stdout:', stdout);
-        if (stderr) console.error('Backup stderr:', stderr);
+      try {
+        // Use the new FileOperations module
+        const result = await fileOps.createBackup({
+          sources: settings.sources,
+          outputDir: settings.outputDir,
+          version: version,
+          packFiles: shouldPack,
+          folderName: settings.folderName,
+          suffix: settings.suffix,
+          force: forceOverwrite,
+          deselected: Array.from(treeDataProvider.deselectedItems)
+        });
 
-        if (error) {
-          console.error('Backup execution error:', error);
-          vscode.window.showErrorMessage(`Backup failed: ${error.message}`);
-        } else if (stdout.includes('SUCCESS:')) {
-          // Extract destination path from success message
-          const successMatch = stdout.match(/SUCCESS: backup created at (.+)/);
-          const destination = successMatch ? successMatch[1] : 'unknown location';
-          vscode.window.showInformationMessage(`✅ Backup completed successfully at: ${destination}`);
+        if (result.success) {
+          const destName = path.basename(result.destination);
+          vscode.window.showInformationMessage(`✅ Backup completed successfully! Created: ${destName}`);
+
+          // Also show a secondary notification with the full path after a delay
+          setTimeout(() => {
+            vscode.window.showInformationMessage(`📁 Location: ${result.destination}`);
+          }, 1500);
         } else {
-          vscode.window.showWarningMessage('Backup completed with warnings. Check output for details.');
+          vscode.window.showErrorMessage('Backup failed with unknown error.');
         }
-      });
+      } catch (error) {
+        console.error('Backup failed:', error);
+        vscode.window.showErrorMessage(`Backup failed: ${error.message}`);
+      }
     }),
 
     vscode.commands.registerCommand('backup-vault.refresh', function () {
@@ -244,7 +235,7 @@ function activate(context) {
       if (!treeDataProvider) return;
 
       const result = await vscode.window.showInputBox({
-        prompt: 'Enter folder name for packed backups',
+        prompt: 'Enter packing folder name',
         value: treeDataProvider.folderName,
         placeHolder: 'Backup'
       });
@@ -257,7 +248,7 @@ function activate(context) {
       }
     }),
 
-    vscode.commands.registerCommand('backup-vault.selectionSummary', function () {
+    vscode.commands.registerCommand('backup-vault.selectionSummary', async function () {
       if (!treeDataProvider) {
         return 'No data provider';
       }
@@ -276,8 +267,10 @@ function activate(context) {
           const stats = require('fs').statSync(itemPath);
           if (stats.isDirectory()) {
             directFolders++;
-            // Count all items in this directory recursively
-            totalItems += countItemsInDirectory(itemPath);
+            // Count all items in this directory recursively using FileOperations
+            if (fileOps) {
+              totalItems += await fileOps.countItemsInDirectory(itemPath);
+            }
           } else {
             directFiles++;
             totalItems++;
@@ -292,13 +285,15 @@ function activate(context) {
     }),
 
     vscode.commands.registerCommand('backup-vault.sendFiles', async function () {
-      if (!treeDataProvider) {
-        vscode.window.showErrorMessage('Backup Vault is not initialized.');
+      if (!fileOps || !treeDataProvider) {
+        vscode.window.showErrorMessage('Backup Vault is not properly initialized.');
         return;
       }
 
-      // Get selected items from workspace tree
-      const selectedItems = Array.from(treeDataProvider.selectedItems);
+      // Get selected items from workspace tree, filtering out deselected items
+      const selectedItems = Array.from(treeDataProvider.selectedItems).filter(itemPath =>
+        !treeDataProvider.deselectedItems.has(itemPath)
+      );
       if (selectedItems.length === 0) {
         vscode.window.showErrorMessage('No files selected. Please select files in the Backup Vault panel.');
         return;
@@ -310,78 +305,60 @@ function activate(context) {
         return;
       }
 
-      // Validate sending directory exists
-      if (!require('fs').existsSync(treeDataProvider.sendingDir)) {
-        vscode.window.showErrorMessage(`Sending directory does not exist: ${treeDataProvider.sendingDir}`);
-        return;
+      console.log('SendFiles: Selected items to send:', selectedItems.length, 'items');
+      console.log('SendFiles: Destination directory:', treeDataProvider.sendingDir);
+
+      // Check for potential overwrites
+      const fs = require('fs');
+      const path = require('path');
+      const wouldOverwrite = selectedItems.some(itemPath => {
+        const itemName = path.basename(itemPath);
+        const destPath = path.join(treeDataProvider.sendingDir, itemName);
+        return fs.existsSync(destPath);
+      });
+
+      if (wouldOverwrite) {
+        const overwrite = await vscode.window.showWarningMessage(
+          `Some files already exist in the sending directory and will be overwritten.\n\nSending directory: ${treeDataProvider.sendingDir}\n\nDo you want to continue?`,
+          { modal: true },
+          'Continue',
+          'Cancel'
+        );
+
+        if (overwrite !== 'Continue') {
+          vscode.window.showInformationMessage('Send files cancelled.');
+          return;
+        }
       }
 
+      vscode.window.showInformationMessage(`Sending ${selectedItems.length} selected item(s) to sending directory...`);
+
       try {
-        const fs = require('fs');
-        const path = require('path');
-
-        console.log('SendFiles: Selected items to send:', selectedItems.length, 'items');
-        console.log('SendFiles: Destination directory:', treeDataProvider.sendingDir);
-
-        // Check for potential overwrites
-        const wouldOverwrite = selectedItems.some(itemPath => {
-          const itemName = path.basename(itemPath);
-          const destPath = path.join(treeDataProvider.sendingDir, itemName);
-          return fs.existsSync(destPath);
+        // Use the new FileOperations module
+        const results = await fileOps.sendFiles({
+          sources: selectedItems,
+          sendingDir: treeDataProvider.sendingDir,
+          deselected: Array.from(treeDataProvider.deselectedItems)
         });
 
-        if (wouldOverwrite) {
-          const overwrite = await vscode.window.showWarningMessage(
-            `Some files already exist in the sending directory and will be overwritten.\n\nSending directory: ${treeDataProvider.sendingDir}\n\nDo you want to continue?`,
-            { modal: true },
-            'Continue',
-            'Cancel'
-          );
-
-          if (overwrite !== 'Continue') {
-            vscode.window.showInformationMessage('Send files cancelled.');
-            return;
-          }
-        }
-
-        vscode.window.showInformationMessage(`Sending ${selectedItems.length} selected item(s) to sending directory...`);
-
-        let successCount = 0;
-        let errorCount = 0;
-
-        for (const sourcePath of selectedItems) {
-          try {
-            // Validate source exists
-            if (!fs.existsSync(sourcePath)) {
-              console.warn(`Source does not exist, skipping: ${sourcePath}`);
-              errorCount++;
-              continue;
-            }
-
-            // Get the base name for destination
-            const itemName = path.basename(sourcePath);
-            const destPath = path.join(treeDataProvider.sendingDir, itemName);
-
-            // Copy the item (file or directory) recursively, allowing overwrites
-            copyItemRecursive(sourcePath, destPath);
-            successCount++;
-            console.log(`Successfully copied: ${sourcePath} -> ${destPath}`);
-
-          } catch (error) {
-            console.error(`Failed to copy ${sourcePath}:`, error);
-            errorCount++;
-          }
-        }
-
         // Show final status
-        if (successCount > 0 && errorCount === 0) {
-          vscode.window.showInformationMessage(`✅ Successfully sent ${successCount} item(s) to: ${treeDataProvider.sendingDir}`);
-        } else if (successCount > 0 && errorCount > 0) {
-          vscode.window.showWarningMessage(`⚠️ Partially completed: ${successCount} item(s) sent, ${errorCount} failed. Check output for details.`);
+        if (results.successCount > 0 && results.errorCount === 0) {
+          vscode.window.showInformationMessage(`✅ Send completed! ${results.successCount} item(s) sent successfully`);
+
+          // Show destination info after a delay
+          setTimeout(() => {
+            vscode.window.showInformationMessage(`📁 Sent to: ${treeDataProvider.sendingDir}`);
+          }, 1500);
+        } else if (results.successCount > 0 && results.errorCount > 0) {
+          vscode.window.showWarningMessage(`⚠️ Partially completed: ${results.successCount} item(s) sent, ${results.errorCount} failed. Check output for details.`);
         } else {
           vscode.window.showErrorMessage(`❌ Failed to send any items. Check console for details.`);
         }
 
+        // Log errors if any
+        if (results.errors && results.errors.length > 0) {
+          console.error('Send files errors:', results.errors);
+        }
       } catch (error) {
         console.error('Send files operation failed:', error);
         vscode.window.showErrorMessage(`Send files failed: ${error.message}`);
@@ -391,68 +368,5 @@ function activate(context) {
 }
 exports.activate = activate;
 
-// Helper function to count items in directory recursively
-function countItemsInDirectory(dirPath) {
-  try {
-    let count = 0;
-    const items = require('fs').readdirSync(dirPath, { withFileTypes: true });
-
-    for (const item of items) {
-      count++; // Count this item
-      if (item.isDirectory()) {
-        // Recursively count items in subdirectory
-        count += countItemsInDirectory(require('path').join(dirPath, item.name));
-      }
-    }
-
-    return count;
-  } catch (error) {
-    return 0;
-  }
-}
-
 function deactivate() {}
 exports.deactivate = deactivate;
-
-// Helper function to copy files and directories recursively
-function copyItemRecursive(source, destination) {
-  const fs = require('fs');
-  const path = require('path');
-
-  try {
-    const stats = fs.statSync(source);
-
-    if (stats.isDirectory()) {
-      // Create destination directory if it doesn't exist
-      if (!fs.existsSync(destination)) {
-        fs.mkdirSync(destination, { recursive: true });
-        console.log(`Created directory: ${destination}`);
-      }
-
-      // Copy all contents of the directory
-      const entries = fs.readdirSync(source);
-      console.log(`Copying ${entries.length} items from directory: ${source}`);
-
-      for (const entry of entries) {
-        const srcPath = path.join(source, entry);
-        const destPath = path.join(destination, entry);
-        console.log(`Copying: ${srcPath} -> ${destPath}`);
-        copyItemRecursive(srcPath, destPath);
-      }
-    } else {
-      // Copy file, allowing overwrite
-      const fileContent = fs.readFileSync(source);
-      fs.writeFileSync(destination, fileContent);
-      console.log(`File copied successfully: ${source} -> ${destination}`);
-
-      // Verify the copy
-      const destStats = fs.statSync(destination);
-      if (destStats.size !== stats.size) {
-        throw new Error(`File size mismatch: source ${stats.size} bytes, destination ${destStats.size} bytes`);
-      }
-    }
-  } catch (error) {
-    console.error(`Error copying ${source} to ${destination}:`, error);
-    throw error;
-  }
-}

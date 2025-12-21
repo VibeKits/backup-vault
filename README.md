@@ -1,88 +1,98 @@
 # Backup Vault
 
-A powerful backup and file transfer extension for Visual Studio Code that simplifies versioned backups and file distribution workflows.
+VS Code extension for secure file backup and transfer with data integrity verification.
+
+## How It Works
+
+- **SHA-256 Verification**: Every file is hashed before and after operations to detect corruption
+- **Native Node.js Operations**: Direct file system access without external dependencies
+- **Retry Logic**: Automatic retry with exponential backoff for transient failures
+- **Cross-Platform**: Works on Windows, macOS, and Linux
+- **Memory Efficient**: Streaming operations prevent memory issues with large files
 
 ## Features
 
-### 🔄 Versioned Backup Creation
-- Create timestamped backups with custom version suffixes
-- Intelligent file handling: single files get suffix inserted before extension, multiple files are packed into folders
-- Configurable backup output directories
-- Overwrite protection with user confirmation
-- PowerShell-powered backup operations for robust file handling
+### Backup Operations
+- Versioned backups with configurable suffixes (e.g., `filename_v1.0.ext`)
+- Automatic file packing for multiple selections
+- Directory structure preservation
+- Overwrite protection with confirmation dialogs
 
-### 📤 File Transfer Operations
-- Send selected files and folders to configured destination directories
-- Recursive copying with full directory structure preservation
-- Overwrite confirmation for existing files
-- Real-time progress feedback and completion notifications
+### File Transfer
+- Recursive copying with progress feedback
+- Configurable source and destination directories
+- Batch operations for multiple files/folders
 
-### 🎛️ Interactive Selection Interface
-- Visual workspace tree view for intuitive file/folder selection
-- Smart selection logic: parent folder selection automatically excludes children
-- Selection summary showing folder/file counts and total items
-- Bulk operations with select all/none functionality
-- Persistent selection state across sessions
+### Selection Interface
+- Visual tree view for file/folder selection
+- Parent-child deselection logic
+- Selection summaries with item counts
+- Bulk operations (select all, select none, toggle)
 
-### ⚙️ Comprehensive Configuration
-- **Output Directory**: Set where backups are stored
-- **Sending Directory**: Configure file transfer destination
-- **Version Suffix**: Customize backup versioning (default: "v")
-- **File Packing**: Toggle folder creation for backups (auto-enabled for multiple selections)
-- **Folder Name**: Set custom names for packed backup folders
-- Persistent settings saved across VS Code sessions
+### Configuration
+- Persistent settings storage
+- Custom output and sending directories
+- Configurable version suffixes and folder names
+- File packing toggle
+
+## Use Cases
+
+### Software Development
+- Project versioning and code backups
+- Release artifact management
+- Cross-platform development workflows
+
+### Content Creation
+- Asset library backups
+- Project file versioning
+- Digital media organization
+
+### Data Analysis
+- Dataset integrity verification
+- Research data archiving
+- Analytical workflow backups
+
+### System Administration
+- Configuration file backups
+- Log file management
+- Automated backup scripts
 
 ## Usage
 
-### Setting Up Directories
-1. Open the **Backup Vault** panel in the Explorer sidebar
-2. Expand **⚙️ Backup Settings**
-3. Click **📁 Output Directory** to set where backups are saved
-4. Click **📤 Sending Directory** to set file transfer destination
-
 ### Creating Backups
-1. Select files/folders in the **Backup Vault** tree view (checkmarks indicate selection)
-2. Run **Backup Vault: Create Backup** from the command palette (`Ctrl+Shift+P`)
-3. Enter your version number when prompted (e.g., "1.2.3" or "20231221")
-4. Confirm overwrite if a backup with that version already exists
+1. Open Backup Vault panel in Explorer sidebar
+2. Select files/folders to backup
+3. Run "Backup Vault: Create Backup" command
+4. Enter version number when prompted
 
 ### Transferring Files
-1. Select files/folders in the **Backup Vault** tree view
-2. Ensure sending directory is configured in settings
-3. Run **Backup Vault: Send Files** from the command palette
-4. Confirm overwrite if files already exist at destination
+1. Configure sending directory in panel settings
+2. Select source files/folders
+3. Run "Backup Vault: Send Files" command
 
-### Advanced Configuration
-- **Version Suffix**: Click to change from default "v" to "_", "ver", etc.
-- **File Packing**: Toggle to control whether single files are packed into folders
-- **Folder Name**: Set custom name for packed backup folders (default: "Backup")
+### Configuration
+Access settings through the Backup Vault panel:
+- Output Directory: Backup destination path
+- Sending Directory: Transfer destination path
+- Version Suffix: Backup naming prefix (default: "v")
+- File Packing: Enable for multiple file selections
 
 ## Requirements
 
-- **VS Code**: 1.70.0 or higher
-- **Operating System**: Windows (PowerShell required for backup operations)
-- **PowerShell**: Must be available in system PATH
+- VS Code 1.70.0 or higher
+- Node.js (built-in with VS Code)
 
 ## Installation
 
-Install from the VS Code Marketplace or download the .vsix file and install manually.
+Install from VS Code Marketplace or manually install .vsix file.
 
-## Architecture
+## Technical Details
 
-The extension consists of:
-- **Tree View Interface**: Custom VS Code tree data provider for file selection
-- **PowerShell Integration**: External script execution for robust backup operations
-- **Configuration System**: Workspace state persistence for settings
-- **File Operations**: Node.js fs module for file transfer operations
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
+- **Data Integrity**: SHA-256 hashing ensures 100% content verification
+- **Error Handling**: Comprehensive recovery from file system errors
+- **Performance**: Streaming I/O prevents memory exhaustion
+- **Compatibility**: Native operations work across all supported platforms
 
 ## License
 
-This extension is licensed under the MIT License.
-
-## Support
-
-If you encounter any issues or have feature requests, please create an issue on the GitHub repository.
+MIT License

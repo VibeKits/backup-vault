@@ -5,6 +5,40 @@ All notable changes to **Backup Vault** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2] - 2025-12-20
+
+### Major Architecture Changes
+- **Replaced PowerShell with Native Node.js**: Eliminated Windows-only dependency for true cross-platform support
+- **Added SHA-256 Hash Verification**: Complete content integrity checking for all files
+- **Implemented Retry Logic**: Automatic retry with exponential backoff for transient failures
+
+### Added
+- **Unit Tests**: Comprehensive test suite covering hash verification, retry logic, and backup operations
+- **Enhanced Error Recovery**: Better handling of temporary file system issues
+- **Improved Success Notifications**: More visible and informative success messages
+
+### Security & Reliability
+- **100% Content Verification**: Every file is hashed before and after backup - detects any corruption
+- **Zero Data Loss Guarantee**: Backup fails if any file hash doesn't match source
+- **Transient Failure Recovery**: Automatic retry for EBUSY, EMFILE, and other temporary errors
+- **Memory-Efficient Hashing**: Streaming SHA-256 calculation prevents memory issues with large files
+- **Graceful Temp Cleanup**: Handles successful directory moves without spurious warnings
+
+### Testing
+- **9 Comprehensive Unit Tests**: Covering hash calculation, verification, retry logic, and backup creation
+- **Edge Case Coverage**: Empty files, permission errors, concurrent access
+
+### Bug Fixes
+- **Fixed const variable assignment error** in hash verification logic
+- **Fixed directory hash verification** for single directory backups (packFiles: false)
+- **Fixed hash key mismatch** for directory backups with version suffixes - now compares relative paths correctly
+- **Improved temp directory cleanup** to handle successful renames gracefully
+- **Enhanced success notifications** with better visibility and follow-up messages
+
+### Performance Improvements
+- **Streaming I/O**: Prevents memory exhaustion with large files
+- **Direct OS Operations**: Faster file operations without shell overhead
+
 ## [0.0.1] - 2025-12-19
 
 ### Added

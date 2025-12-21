@@ -84,77 +84,6 @@ class SendingDirSetting {
     }
 }
 
-class SelectionIndicator {
-    constructor(selectedItems) {
-        this.selectedItems = selectedItems;
-        this.name = '📊 Selection Summary';
-        this.tooltip = 'Shows count of selected folders, files, and total items';
-    }
-
-    getTreeItem() {
-        const item = new vscode.TreeItem(this.name, vscode.TreeItemCollapsibleState.None);
-        item.description = this.getSelectionCounts();
-        item.contextValue = 'indicator';
-        item.tooltip = this.tooltip;
-        // Make it non-clickable by not setting a command
-        return item;
-    }
-
-    getChildren() {
-        return [];
-    }
-
-    getSelectionCounts() {
-        if (!this.selectedItems || this.selectedItems.size === 0) {
-            return 'None selected';
-        }
-
-        let directFolders = 0;
-        let directFiles = 0;
-        let totalItems = 0;
-
-        for (const itemPath of this.selectedItems) {
-            try {
-                const stats = require('fs').statSync(itemPath);
-                if (stats.isDirectory()) {
-                    directFolders++;
-                    // Count all items in this directory recursively
-                    totalItems += this.countItemsInDirectory(itemPath);
-                } else {
-                    directFiles++;
-                    totalItems++;
-                }
-            } catch (error) {
-                // Skip invalid paths
-                continue;
-            }
-        }
-
-        return `${directFolders} folders, ${directFiles} files (${totalItems} total)`;
-    }
-
-    countItemsInDirectory(dirPath) {
-        try {
-            let count = 0;
-            const items = require('fs').readdirSync(dirPath, { withFileTypes: true });
-
-            for (const item of items) {
-                count++; // Count this item
-                if (item.isDirectory()) {
-                    // Recursively count items in subdirectory
-                    count += this.countItemsInDirectory(path.join(dirPath, item.name));
-                }
-            }
-
-            return count;
-        } catch (error) {
-            return 0;
-        }
-    }
-}
-
-
-
 class SuffixSetting {
     constructor(currentValue) {
         this.name = '🔖 Version Suffix';
@@ -220,9 +149,9 @@ class PackSetting {
 
 class FolderNameSetting {
     constructor(currentValue) {
-        this.name = '📂 Folder Name';
+        this.name = '📦 Packing Folder Name';
         this.currentValue = currentValue || 'Backup';
-        this.tooltip = 'Click to edit folder name for packed backups';
+        this.tooltip = 'Click to edit the name of the folder for packed backups';
     }
 
     getTreeItem() {
@@ -232,13 +161,110 @@ class FolderNameSetting {
         item.tooltip = this.tooltip;
         item.command = {
             command: 'backup-vault.editFolderName',
-            title: 'Edit Folder Name'
+            title: 'Edit Packing Folder Name'
         };
         return item;
     }
 
     getChildren() {
         return [];
+    }
+}
+
+class SelectionIndicator {
+    constructor(selectedItems, deselectedItems) {
+        this.selectedItems = selectedItems;
+        this.deselectedItems = deselectedItems;
+        this.name = '📊 Selection Summary';
+        this.tooltip = 'Shows count of selected folders, files, and total items';
+    }
+
+    getTreeItem() {
+        const item = new vscode.TreeItem(this.name, vscode.TreeItemCollapsibleState.None);
+        item.description = this.getSelectionCounts();
+        item.contextValue = 'indicator';
+        item.tooltip = this.tooltip;
+        // Make it non-clickable by not setting a command
+        return item;
+    }
+
+    getChildren() {
+        return [];
+    }
+
+    getSelectionCounts() {
+        if (!this.selectedItems || this.selectedItems.size === 0) {
+            return 'None selected';
+        }
+
+        let directFolders = 0;
+        let directFiles = 0;
+        let totalItems = 0;
+
+        // Count all directly selected items and their contents, minus deselected items
+        for (const itemPath of this.selectedItems) {
+            try {
+                const stats = fs.statSync(itemPath);
+                if (stats.isDirectory()) {
+                    directFolders++;
+                    // Count selected items in this directory (accounting for deselected items)
+                    totalItems += this.countSelectedItemsInDirectory(itemPath);
+                } else {
+                    // Only count files that aren't deselected
+                    if (!this.deselectedItems.has(itemPath)) {
+                        directFiles++;
+                        totalItems++;
+                    }
+                }
+            } catch (error) {
+                // Skip invalid paths
+                continue;
+            }
+        }
+
+        return `${directFolders} folders, ${directFiles} files (${totalItems} total)`;
+    }
+
+    countSelectedItemsInDirectory(dirPath) {
+        try {
+            let count = 0;
+            const items = fs.readdirSync(dirPath, { withFileTypes: true });
+
+            for (const item of items) {
+                const itemPath = path.join(dirPath, item.name);
+                // Only count items that are not in deselectedItems
+                if (!this.deselectedItems.has(itemPath)) {
+                    count++; // Count this item
+                    if (item.isDirectory()) {
+                        // Recursively count selected items in subdirectory
+                        count += this.countSelectedItemsInDirectory(itemPath);
+                    }
+                }
+            }
+
+            return count;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    countItemsInDirectory(dirPath) {
+        try {
+            let count = 0;
+            const items = fs.readdirSync(dirPath, { withFileTypes: true });
+
+            for (const item of items) {
+                count++; // Count this item
+                if (item.isDirectory()) {
+                    // Recursively count items in subdirectory
+                    count += this.countItemsInDirectory(path.join(dirPath, item.name));
+                }
+            }
+
+            return count;
+        } catch (error) {
+            return 0;
+        }
     }
 }
 
@@ -333,6 +359,7 @@ class BackupTreeDataProvider {
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
         this.workspaceRoot = null;
         this.selectedItems = new Set();
+        this.deselectedItems = new Set(); // Track items explicitly deselected from parent selections
 
         // Load saved settings
         this.loadSettings();
@@ -343,6 +370,7 @@ class BackupTreeDataProvider {
         console.log('Loading backup settings from workspace state...');
         const settings = this.context.workspaceState.get('backupSettings', {
             sources: [],
+            deselectedSources: [],
             outputDir: '',
             sendingDir: '',
             packFiles: false,
@@ -352,26 +380,32 @@ class BackupTreeDataProvider {
 
         console.log('Raw settings loaded:', settings);
 
-        // Filter out workspace root and any invalid paths, but allow hidden directories
+        // Filter out invalid paths only (don't filter out root - it can be selected)
         const workspaceRootPath = this.workspaceRoot ? this.workspaceRoot.fullPath : null;
         let validSources = settings.sources.filter(path => {
-            // Exclude workspace root
-            if (workspaceRootPath && path === workspaceRootPath) {
-                return false;
-            }
             // Exclude non-existent paths only
             try {
-                return require('fs').existsSync(path);
+                return fs.existsSync(path);
             } catch {
                 return false;
             }
         });
 
-        // Remove parent-child duplicates (if a parent is selected, remove all its children)
-        validSources = this.removeParentChildDuplicates(validSources);
+        // Remove parent-child conflicts (root vs children, but allow root)
+        validSources = this.removeParentChildConflicts(validSources, workspaceRootPath);
 
-        console.log('Final valid sources after filtering and deduplication:', validSources);
+        console.log('Final valid sources after filtering and conflict resolution:', validSources);
         this.selectedItems = new Set(validSources);
+
+        // Load deselected items, filtering out invalid paths
+        let validDeselected = (settings.deselectedSources || []).filter(path => {
+            try {
+                return fs.existsSync(path);
+            } catch {
+                return false;
+            }
+        });
+        this.deselectedItems = new Set(validDeselected);
 
         // Load other settings
         this.outputDir = settings.outputDir;
@@ -380,37 +414,43 @@ class BackupTreeDataProvider {
         this.folderName = settings.folderName;
         this.suffix = settings.suffix;
 
-        console.log('Settings loaded - selectedItems:', Array.from(this.selectedItems));
+        console.log('Settings loaded - selectedItems:', Array.from(this.selectedItems), 'deselectedItems:', Array.from(this.deselectedItems));
     }
 
     saveSettings() {
-        // Minimal filtering for save - preserve user selections but remove truly invalid ones
-        const workspaceRootPath = this.workspaceRoot ? this.workspaceRoot.fullPath : null;
+        // Filter out invalid paths only (allow root to be saved)
         let filteredSources = Array.from(this.selectedItems).filter(path => {
-            // Exclude workspace root (safety check - shouldn't be selectable anyway)
-            if (workspaceRootPath && path === workspaceRootPath) {
-                return false;
-            }
             // Exclude non-existent paths only
             try {
-                return require('fs').existsSync(path);
+                return fs.existsSync(path);
             } catch {
                 return false;
             }
         });
 
-        // Remove parent-child duplicates (if a parent is selected, remove all its children)
-        filteredSources = this.removeParentChildDuplicates(filteredSources);
+        // Remove parent-child conflicts (allow root, but not root + children)
+        const workspaceRootPath = this.workspaceRoot ? this.workspaceRoot.fullPath : null;
+        filteredSources = this.removeParentChildConflicts(filteredSources, workspaceRootPath);
+
+        // Filter deselected items to only include valid paths
+        let filteredDeselected = Array.from(this.deselectedItems).filter(path => {
+            try {
+                return fs.existsSync(path);
+            } catch {
+                return false;
+            }
+        });
 
         const settings = {
             sources: filteredSources,
+            deselectedSources: filteredDeselected,
             outputDir: this.outputDir,
             sendingDir: this.sendingDir,
             packFiles: this.packFiles,
             folderName: this.folderName,
             suffix: this.suffix
         };
-        console.log('Saving settings with sources:', settings.sources);
+        console.log('Saving settings with sources:', settings.sources, 'deselectedSources:', settings.deselectedSources);
         this.context.workspaceState.update('backupSettings', settings);
     }
 
@@ -433,12 +473,12 @@ class BackupTreeDataProvider {
 
     getChildren(element) {
         if (!this.workspaceRoot) {
-            return [new SelectionIndicator(this.selectedItems), new SettingsItem()]; // Still show settings even without workspace
+            return [new SelectionIndicator(this.selectedItems, this.deselectedItems), new SettingsItem()]; // Still show settings even without workspace
         }
 
         if (!element) {
             // Root level - return selection indicator, settings item and workspace root
-            return [new SelectionIndicator(this.selectedItems), new SettingsItem(), this.workspaceRoot];
+            return [new SelectionIndicator(this.selectedItems, this.deselectedItems), new SettingsItem(), this.workspaceRoot];
         }
 
         return element.getChildren();
@@ -449,38 +489,31 @@ class BackupTreeDataProvider {
     }
 
     toggleSelection(item) {
-        console.log('toggleSelection called with item:', item.name, 'path:', item.fullPath);
+        console.log('toggleSelection called with item:', item.name, 'path:', item.fullPath, 'isRoot:', item.isRoot);
         console.log('selectedItems before toggle:', Array.from(this.selectedItems));
+        console.log('deselectedItems:', Array.from(this.deselectedItems));
 
-        // Validate path exists
-        if (!require('fs').existsSync(item.fullPath)) {
-            vscode.window.showErrorMessage(`Path no longer exists: ${item.fullPath}`);
-            return;
-        }
-
-        const path = item.fullPath;
-        const wasSelected = this.selectedItems.has(path);
-        console.log('Item was selected:', wasSelected);
+        const wasSelected = this.isItemSelected(item);
+        console.log('Item was selected (accounting for deselectedItems):', wasSelected);
 
         if (wasSelected) {
-            console.log('Unselecting item');
-            // Unselecting - remove this item and all its children
-            this.unselectItemAndChildren(item);
+            console.log('Deselecting item');
+            // Deselecting - unified logic for both files and directories
+            this.deselectItem(item);
         } else {
-            console.log('Checking if parent is selected');
-            // Check if parent is already selected
-            if (this.isParentSelected(item)) {
-                console.log('Parent is selected - cannot select child');
-                vscode.window.showInformationMessage('Cannot select item - parent folder is already selected');
-                return;
+            console.log('Selecting item');
+            // Selecting
+            if (item.isDirectory) {
+                this.selectFolder(item);
+            } else {
+                this.selectFile(item);
             }
 
-            console.log('Selecting item - adding to selectedItems');
-            // Selecting - add this item (but not its children to avoid duplication)
-            this.selectedItems.add(item.fullPath);
-
-            // Remove any children that might be individually selected
-            this.removeChildSelections(item);
+            // For root selection, auto-enable packing since we're backing up the entire workspace
+            if (item.isRoot && !this.packFiles) {
+                console.log('Root selected - auto-enabling packFiles');
+                this.packFiles = true;
+            }
         }
 
         console.log('selectedItems after toggle:', Array.from(this.selectedItems));
@@ -492,8 +525,12 @@ class BackupTreeDataProvider {
         }
 
         this.saveSettings();
-        // Refresh entire tree so settings get re-evaluated
-        this._onDidChangeTreeData.fire();
+        // Comprehensive tree refresh to ensure all UI elements update correctly
+        this._onDidChangeTreeData.fire(); // Full tree refresh
+        this._onDidChangeTreeData.fire(undefined); // Force complete rebuild
+        // Refresh all ancestors to ensure checkmarks update for nested folders
+        this.refreshAncestors(item);
+        this._onDidChangeTreeData.fire(item);
     }
 
     isParentSelected(item) {
@@ -551,15 +588,19 @@ class BackupTreeDataProvider {
         }
     }
 
-    // Check if an item is selected (either directly or through parent)
+    // Check if an item is selected (either directly or through parent, but not explicitly deselected)
     isItemSelected(item) {
         // Check if this item is directly selected
         if (this.selectedItems.has(item.fullPath)) {
             return true;
         }
 
-        // Check if any parent is selected
-        return this.isParentSelected(item);
+        // Check if any parent is selected and this item hasn't been explicitly deselected
+        if (this.isParentSelected(item) && !this.deselectedItems.has(item.fullPath)) {
+            return true;
+        }
+
+        return false;
     }
 
     selectAllChildren(item) {
@@ -572,6 +613,39 @@ class BackupTreeDataProvider {
                 this.selectAllChildren(child);
             }
         }
+    }
+
+    // Remove parent-child conflicts (allow root, but not root + children)
+    removeParentChildConflicts(paths, workspaceRootPath) {
+        if (paths.length <= 1) return paths;
+
+        // Check if root is selected along with children
+        const hasRoot = workspaceRootPath && paths.includes(workspaceRootPath);
+        if (hasRoot) {
+            // If root is selected, remove all children of root
+            const rootChildren = paths.filter(p =>
+                p.startsWith(workspaceRootPath + '\\') ||
+                p.startsWith(workspaceRootPath + '/')
+            );
+            return [workspaceRootPath]; // Only keep root
+        }
+
+        // Otherwise, use normal parent-child deduplication
+        return this.removeParentChildDuplicates(paths);
+    }
+
+    // Check if any children of the given item are selected
+    hasSelectedChildren(item) {
+        const itemPath = item.fullPath;
+        const sep1 = path.sep;
+        const sep2 = sep1 === '\\' ? '/' : '\\';
+
+        for (const selectedPath of this.selectedItems) {
+            if (selectedPath.startsWith(itemPath + sep1) || selectedPath.startsWith(itemPath + sep2)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Remove paths that are children of other selected paths
@@ -594,6 +668,201 @@ class BackupTreeDataProvider {
         }
 
         return result;
+    }
+
+    // New helper methods for improved selection logic
+
+    selectFolder(folder) {
+        console.log('selectFolder called for:', folder.name);
+
+        // Remove from deselected items if it was there (fixes issue with re-selecting deselected child folders)
+        this.deselectedItems.delete(folder.fullPath);
+
+        // Check if already selected through parent - if so, don't add to selectedItems
+        if (this.isParentSelected(folder)) {
+            console.log('Folder already selected through parent, skipping direct selection');
+            // Still need to clear deselected items within this folder
+            this.clearDeselectedItemsInFolder(folder);
+            return;
+        }
+
+        // Remove any individually selected children
+        this.removeChildSelections(folder);
+        // Clear any deselected items within this folder
+        this.clearDeselectedItemsInFolder(folder);
+        // Add the folder itself
+        this.selectedItems.add(folder.fullPath);
+        console.log('Added folder to selectedItems:', folder.fullPath);
+    }
+
+    selectFile(file) {
+        console.log('selectFile called for:', file.name);
+        // Remove from deselected items if it was there
+        this.deselectedItems.delete(file.fullPath);
+        // Check if already selected through parent
+        if (this.isParentSelected(file)) {
+            console.log('File already selected through parent, skipping');
+            return;
+        }
+        // Add the file
+        this.selectedItems.add(file.fullPath);
+        console.log('Added file to selectedItems:', file.fullPath);
+        // Check if all siblings are now selected
+        this.checkAndSelectParentIfAllSiblingsSelected(file);
+    }
+
+    deselectItem(item) {
+        console.log('deselectItem called for:', item.name, 'isDirectory:', item.isDirectory);
+        const wasDirectlySelected = this.selectedItems.has(item.fullPath);
+
+        if (!wasDirectlySelected) {
+            // Item appears selected only through parent - add to deselected items
+            // Parent stays selected, but this specific item and all its children are now excluded
+            console.log('Item deselected from parent selection, adding to deselectedItems');
+            if (item.isDirectory) {
+                this.addDeselectedItemsInFolder(item);
+            } else {
+                this.deselectedItems.add(item.fullPath);
+            }
+
+            // Check if this was the last selected child - if so, deselect the parent
+            if (item.parent && this.selectedItems.has(item.parent.fullPath)) {
+                this.checkAndDeselectParentIfNoChildrenSelected(item.parent);
+            }
+        } else {
+            // Item was directly selected - remove it
+            this.selectedItems.delete(item.fullPath);
+            console.log('Removed item from selectedItems:', item.fullPath);
+
+            // If this is a folder, clear deselected items in its subtree
+            if (item.isDirectory) {
+                this.clearDeselectedItemsInFolder(item);
+            }
+        }
+    }
+
+
+
+    checkAndSelectParentIfAllSiblingsSelected(file) {
+        console.log('checkAndSelectParentIfAllSiblingsSelected called for:', file.name);
+        if (!file.parent) {
+            console.log('No parent, returning');
+            return;
+        }
+
+        // Ensure parent children are loaded
+        this.ensureChildrenLoaded(file.parent);
+
+        const siblings = this.getAllSiblings(file);
+        console.log('Siblings found:', siblings.length);
+        const allSiblingsSelected = siblings.every(sibling => this.selectedItems.has(sibling.fullPath));
+        console.log('All siblings selected:', allSiblingsSelected);
+
+        if (allSiblingsSelected && siblings.length > 0) {
+            console.log('Selecting parent folder');
+            this.selectFolder(file.parent);
+        }
+    }
+
+    getAllSiblings(item) {
+        if (!item.parent) return [];
+        // Ensure parent children are loaded
+        this.ensureChildrenLoaded(item.parent);
+        return item.parent.children.filter(child => child !== item);
+    }
+
+    ensureChildrenLoaded(parent) {
+        if (parent.children.length === 0) {
+            parent.getChildren(); // This will populate parent.children
+        }
+    }
+
+    clearDeselectedItemsInFolder(folder) {
+        const folderPath = folder.fullPath;
+        const sep1 = path.sep;
+        const sep2 = sep1 === '\\' ? '/' : '\\';
+
+        // Remove any deselected items that are children of this folder (string-based approach)
+        for (const deselectedPath of [...this.deselectedItems]) {
+            if (deselectedPath.startsWith(folderPath + sep1) || deselectedPath.startsWith(folderPath + sep2)) {
+                this.deselectedItems.delete(deselectedPath);
+            }
+        }
+
+        // Also clear from loaded children (for completeness and to ensure tree items update)
+        if (folder.children.length > 0) {
+            for (const child of folder.children) {
+                this.deselectedItems.delete(child.fullPath);
+                if (child.isDirectory) {
+                    this.clearDeselectedItemsInFolder(child);
+                }
+            }
+        }
+    }
+
+    addDeselectedItemsInFolder(folder) {
+        const folderPath = folder.fullPath;
+
+        // Add the folder itself
+        this.deselectedItems.add(folderPath);
+
+        // Recursively scan filesystem to add all children (not just loaded ones)
+        try {
+            const items = fs.readdirSync(folderPath, { withFileTypes: true });
+            for (const item of items) {
+                const itemPath = path.join(folderPath, item.name);
+                this.deselectedItems.add(itemPath);
+                if (item.isDirectory()) {
+                    // Recursively add subdirectory contents
+                    this.addDeselectedItemsInFolderRecursive(itemPath);
+                }
+            }
+        } catch (error) {
+            // Skip directories that can't be read
+            console.warn('Could not read directory for deselection:', folderPath, error);
+        }
+    }
+
+    addDeselectedItemsInFolderRecursive(folderPath) {
+        // Helper method for recursive filesystem scanning
+        try {
+            const items = fs.readdirSync(folderPath, { withFileTypes: true });
+            for (const item of items) {
+                const itemPath = path.join(folderPath, item.name);
+                this.deselectedItems.add(itemPath);
+                if (item.isDirectory()) {
+                    this.addDeselectedItemsInFolderRecursive(itemPath);
+                }
+            }
+        } catch (error) {
+            // Skip directories that can't be read
+            console.warn('Could not read subdirectory for deselection:', folderPath, error);
+        }
+    }
+
+    checkAndDeselectParentIfNoChildrenSelected(parent) {
+        console.log('checkAndDeselectParentIfNoChildrenSelected called for:', parent.name);
+        // Ensure parent children are loaded
+        this.ensureChildrenLoaded(parent);
+
+        // Check if any children are still selected (not deselected)
+        const hasSelectedChildren = parent.children.some(child => this.isItemSelected(child));
+        console.log('Parent has selected children:', hasSelectedChildren);
+
+        if (!hasSelectedChildren) {
+            console.log('No children selected, deselecting parent');
+            this.selectedItems.delete(parent.fullPath);
+            // Clear deselected items for this parent since we're deselecting it
+            this.clearDeselectedItemsInFolder(parent);
+        }
+    }
+
+    refreshAncestors(item) {
+        let current = item.parent;
+        while (current) {
+            this._onDidChangeTreeData.fire(current);
+            current = current.parent;
+        }
     }
 }
 
